@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Emotion Detection</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/blazeface"></script>
+  </head>
+  <body>
+    <h1>Emotion Detection</h1>
+    <video id="video" width="640" height="480" hidden autoplay></video>
+    <canvas id="canvas" width="640" height="480"></canvas>
+    <script>
+      const emotionMapper = {
+        0: "anger",
+        1: "disgust",
+        2: "fear",
+        3: "happiness",
+        4: "sadness",
+        5: "surprise",
+        6: "neutral",
+      };
+
+      let model;
+      let blazefaceModel;
+      let video = document.getElementById("video");
+      let canvas = document.getElementById("canvas");
+      let context = canvas.getContext("2d");
+
+      async function setupCamera() {
+        video.srcObject = await navigator.mediaDevices.getUserMedia({
+          video: { width: 640, height: 480 },
+          audio: false,
+        });
+        return new Promise((resolve) => {
+          video.onloadedmetadata = () => {
+            resolve(video);
+          };
+        });
+      }
+
+      async function loadModels() {
+        model = await tf.loadLayersModel(
+          "https://raw.githubusercontent.com/valeriandwi/mood-based-music-recommendation/main/model_js/model.json"
+        );
+        blazefaceModel = await blazeface.load();
+      }
+
+      async function detectFaces() {
+        const returnTensors = false;
+        const flipHorizontal = false;
+        const annotateBoxes = false;
+        return await blazefaceModel.estimateFaces(
+          video,
+          returnTensors,
+          flipHorizontal,
+          annotateBoxes
+        );
+      }
+
+      async function predictEmotion(face) {
+        const faceTensor = tf.browser
+          .fromPixels(face)
+          .resizeBilinear([48, 48])
+          .toFloat()
+          .div(tf.scalar(255.0))
+          .expandDims(0);
+        const prediction = model.predict(faceTensor);
+        const emotion = emotionMapper[prediction.argMax(1).dataSync()[0]];
+        faceTensor.dispose();
+        return emotion;
+      }
+
+      async function main() {
+        await setupCamera();
+        await loadModels();
+
+        video.play();
+
+        while (true) {
+          const faces = await detectFaces();
+          context.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+          for (const face of faces) {
+            const { topLeft, bottomRight } = face;
+            const [x1, y1] = topLeft;
+            const [x2, y2] = bottomRight;
+            const faceImage = context.getImageData(x1, y1, x2 - x1, y2 - y1);
+            const emotion = await predictEmotion(faceImage);
+
+            context.strokeStyle = "red";
+            context.lineWidth = 2;
+            context.strokeRect(x1, y1, x2 - x1, y2 - y1);
+            context.fillStyle = "red";
+            context.font = "20px Arial";
+            context.fillText(emotion, x1, y1 - 10);
+          }
+
+          await tf.nextFrame();
+        }
+      }
+
+      main();
+    </script>
+  </body>
+</html>
